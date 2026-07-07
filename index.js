@@ -1,7 +1,6 @@
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-// Enable stealth plugin
 puppeteer.use(StealthPlugin());
 
 async function scrapeVimeoProfile(url) {
@@ -15,7 +14,10 @@ async function scrapeVimeoProfile(url) {
     const page = await browser.newPage();
 
     try {
-        // Optimize page load by blocking unnecessary resources
+        // ⚠️ TEMPORARILY DISABLED INTERCEPTION: 
+        // Sometimes dropping certain assets breaks React hydration. 
+        // Let's load the full page first to ensure it works, then optimize later.
+        /*
         await page.setRequestInterception(true);
         page.on('request', (req) => {
             if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
@@ -24,43 +26,46 @@ async function scrapeVimeoProfile(url) {
                 req.continue();
             }
         });
+        */
 
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        // 1. Changed to networkidle2 to wait for API calls and React to finish building the page
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
 
-        // Execute extraction inside the browser context
+        // 2. Explicitly wait for the primary identifying element (the Name in the H1)
+        console.log("⏳ Waiting for React DOM to render...");
+        try {
+            await page.waitForSelector('h1', { timeout: 10000 });
+        } catch (timeoutErr) {
+            console.log("⚠️ Timeout waiting for data to render. Taking a debug screenshot...");
+            await page.screenshot({ path: 'debug-vimeo-failed-render.png', fullPage: true });
+            console.log("📸 Screenshot saved as 'debug-vimeo-failed-render.png'. Check this file to see if you hit a Captcha.");
+            // We don't throw here, we let it proceed so you can see exactly what 'N/A's it spits out.
+        }
+
         const extractedData = await page.evaluate(() => {
-            
-            // Helper function to safely get text
             const getText = (selector) => {
                 const el = document.querySelector(selector);
                 return el ? el.innerText.trim() : "N/A";
             };
 
-            // Helper function to safely get an attribute
             const getAttr = (selector, attr) => {
                 const el = document.querySelector(selector);
                 return el ? el.getAttribute(attr) : "N/A";
             };
 
-            // 1. Uploader Details & Time
             const timeElement = document.querySelector('time');
             const uploadTimeRaw = timeElement ? timeElement.getAttribute('datetime') : "N/A";
             const uploadTimeRelative = timeElement ? timeElement.innerText.trim() : "N/A";
             
-            // Assuming the h1 is always the profile name based on the HTML structure
             const profileName = getText('h1'); 
             
-            // 2. Contact & Socials
-            // Look for the specific mailto link
             const emailNode = document.querySelector('a[href^="mailto:"]');
             const email = emailNode ? emailNode.getAttribute('href').replace('mailto:', '') : "N/A";
 
-            // Find social links by matching href substrings
             const instagram = getAttr('a[href*="instagram.com"]', 'href');
             const facebook = getAttr('a[href*="facebook.com"]', 'href');
             const tiktok = getAttr('a[href*="tiktok.com"]', 'href');
             
-            // Find the website (a link that contains http but isn't a known social network or vimeo)
             const allLinks = Array.from(document.querySelectorAll('a[href^="http"]'));
             const websiteNode = allLinks.find(a => 
                 !a.href.includes('vimeo.com') && 
@@ -70,7 +75,6 @@ async function scrapeVimeoProfile(url) {
             );
             const website = websiteNode ? websiteNode.href : "N/A";
 
-            // 3. Video / Address Details using reliable data-testids
             const videoTitle = getText('[data-testid="content-card-title"]');
             const videoUrl = getAttr('[data-testid="content-card-title"]', 'href');
             const videoDate = getText('[data-testid="content-card-subtitle"]');
@@ -94,17 +98,16 @@ async function scrapeVimeoProfile(url) {
             };
         });
 
-        console.log("✅ Extraction Successful:");
+        console.log("✅ Extraction Complete:");
         console.dir(extractedData, { depth: null });
 
         return extractedData;
 
     } catch (error) {
-        console.error(`🛑 Error during scraping: ${error.message}`);
+        console.error(`🛑 Fatal Error: ${error.message}`);
     } finally {
         await browser.close();
     }
 }
 
-// Execute the function (Replace with your actual target URL)
 scrapeVimeoProfile('https://vimeo.com/user68733986');
