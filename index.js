@@ -4,10 +4,11 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const fs = require('fs');
 
+// Enable stealth plugin to prevent detection
 puppeteer.use(StealthPlugin());
 
 // =========================================================
-// 1. EXPONENTIAL BACKOFF (Google API)
+// 1. EXPONENTIAL BACKOFF (Google API 500 Error Fix)
 // =========================================================
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -29,10 +30,10 @@ async function saveWithRetry(sheet, retries = 3) {
 }
 
 // =========================================================
-// 2. CORE SCRAPER ENGINE (Two-Step Routing)
+// 2. CORE SCRAPER ENGINE (Two-Step Routing & Extraction)
 // =========================================================
 async function runScraper() {
-    console.log("🚀 Starting Vimeo Stealth Scraper V11 (Two-Step Profile Extraction)...");
+    console.log("🚀 Starting Vimeo Stealth Scraper V12 (Final Extraction Sequence)...");
 
     const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
     const serviceAccountAuth = new JWT({
@@ -45,7 +46,7 @@ async function runScraper() {
     await doc.loadInfo();
     const sheet = doc.sheetsByIndex[0];
 
-    // Ensure enough columns for Vimeo data (Adjust as needed for your layout)
+    // Ensure enough columns for Vimeo data mapping
     if (sheet.columnCount < 20) {
         await sheet.resize({ rowCount: sheet.rowCount, columnCount: 20 });
     }
@@ -69,7 +70,7 @@ async function runScraper() {
     // 3. Row Execution Loop
     for (let rowIndex = 1; rowIndex < sheet.rowCount; rowIndex++) {
         const originalUrl = sheet.getCell(rowIndex, 0).value; // Assuming Col A has the Video URL
-        const status = sheet.getCell(rowIndex, 19).value || ""; // Using Col T (index 19) for Status
+        const status = sheet.getCell(rowIndex, 19).value || ""; // Using Col T (index 19) for Status Tracker
 
         if (!originalUrl) continue; 
         if (!originalUrl.includes("vimeo.com") || status.includes("✅")) continue; 
@@ -91,7 +92,7 @@ async function runScraper() {
             await page.setViewport({ width: 1920, height: 1080 });
 
             // ---------------------------------------------------------
-            // STEP 1: VIDEO PAGE (Extract Time & Profile Link)
+            // STEP 1: VIDEO PAGE (Extract Relative Time & Profile Link)
             // ---------------------------------------------------------
             console.log(`   -> Loading Video Page...`);
             await page.goto(originalUrl, { waitUntil: 'networkidle2', timeout: 30000 });
@@ -100,12 +101,12 @@ async function runScraper() {
                 const timeEl = document.querySelector('time');
                 const uploaderLink = document.querySelector('[data-testid="uploader-details"] a');
                 
-                // Get the text inside the anchor link or fallback to alt tag
                 const uploaderNameEl = document.querySelector('[data-testid="uploader-details"] span.chakra-text') 
                                     || document.querySelector('[data-testid="uploader-details"] img');
 
                 return {
-                    uploadTime: timeEl ? timeEl.getAttribute('datetime') || timeEl.innerText.trim() : "N/A",
+                    // Extract strictly the inner text (e.g., "1 year ago")
+                    uploadTime: timeEl ? timeEl.innerText.trim() : "N/A",
                     profileUrl: uploaderLink ? uploaderLink.href : null,
                     profileName: uploaderNameEl ? (uploaderNameEl.innerText || uploaderNameEl.alt) : "N/A"
                 };
@@ -148,9 +149,15 @@ async function runScraper() {
                 const email = emailNode ? emailNode.getAttribute('href').replace('mailto:', '') : "N/A";
 
                 const allLinks = Array.from(document.querySelectorAll('a[href^="http"]'));
+                
+                // Strict filtering to exclude Vimeo, Socials, and App Stores
                 const websiteNode = allLinks.find(a => 
-                    !a.href.includes('vimeo.com') && !a.href.includes('instagram.com') && 
-                    !a.href.includes('facebook.com') && !a.href.includes('tiktok.com')
+                    !a.href.includes('vimeo.com') && 
+                    !a.href.includes('instagram.com') && 
+                    !a.href.includes('facebook.com') && 
+                    !a.href.includes('tiktok.com') &&
+                    !a.href.includes('apple.com') &&         
+                    !a.href.includes('play.google.com')      
                 );
 
                 return {
